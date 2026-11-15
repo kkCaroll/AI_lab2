@@ -17,6 +17,6 @@ MODEL = "qwen3.7-flash"
 DECODE = {
     "temperature": 0.7,
     "top_p": 0.8,
-    "max_tokens": 2048,
+    "max_tokens": 8192,
     "enable_thinking": False,
 }

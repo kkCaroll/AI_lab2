@@ -19,13 +19,13 @@ def solve(problem: str) -> dict:
     prompt_tokens, completion_tokens, calls = r["prompt_tokens"], r["completion_tokens"], 1
     rounds = 0
 
-    for _ in range(MAX_ROUNDS):
+    for round_idx in range(MAX_ROUNDS):
         c = chat([{"role": "system", "content": SYSTEM},
                   {"role": "user", "content": critique_prompt(problem, solution)}])
         prompt_tokens += c["prompt_tokens"]
         completion_tokens += c["completion_tokens"]
         calls += 1
-        if _is_correct(c["content"]):
+        if round_idx > 0 and _is_correct(c["content"]):
             break
         r = chat([{"role": "system", "content": SYSTEM},
                   {"role": "user", "content": revise_prompt(problem, solution, c["content"])}])

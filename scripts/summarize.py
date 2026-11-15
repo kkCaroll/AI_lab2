@@ -15,6 +15,7 @@ ORDER = ["direct", "cot", "self_consistency", "self_refine", "debate", "mas"]
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", default="results/raw")
+    parser.add_argument("--total", type=int, default=500)
     args = parser.parse_args()
 
     problems = load_problems()
@@ -24,7 +25,7 @@ def main() -> None:
     rows = []
     for path in sorted(Path(args.dir).glob("*.jsonl")):
         method = path.stem
-        result = evaluate(load_records(path), references, levels)
+        result = evaluate(load_records(path), references, levels, total=args.total)
         rows.append((method, result))
     rows.sort(key=lambda x: ORDER.index(x[0]) if x[0] in ORDER else len(ORDER))
 

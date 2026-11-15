@@ -2,7 +2,7 @@
 
 from collections import Counter
 
-from ..common.extract import extract_answer
+from ..common.extract import extract_answer, normalize
 from ..common.llm import chat
 from ..common.prompts import SYSTEM, cot_prompt
 
@@ -29,7 +29,7 @@ def solve(problem: str) -> dict:
     for _ in range(SAMPLES):
         r = chat(messages)
         outputs.append(r["content"])
-        answers.append(extract_answer(r["content"]))
+        answers.append(normalize(extract_answer(r["content"])))
         prompt_tokens += r["prompt_tokens"]
         completion_tokens += r["completion_tokens"]
     return {

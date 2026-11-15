@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from code.common.data import load_problems
 from code.common.runner import Runner
+from code.mas import system as mas
 from code.methods import cot, debate, direct, self_consistency, self_refine
 
 METHODS = {
@@ -16,18 +17,34 @@ METHODS = {
     "self_consistency": self_consistency.solve,
     "self_refine": self_refine.solve,
     "debate": debate.solve,
+    "mas": mas.solve,
 }
+
+
+def stratified(problems: list[dict], per_level: int) -> list[dict]:
+    """按 level 各取前 per_level 题，用于试点。"""
+    used: dict[str, int] = {}
+    subset = []
+    for item in problems:
+        level = str(item["level"])
+        if used.get(level, 0) < per_level:
+            subset.append(item)
+            used[level] = used.get(level, 0) + 1
+    return subset
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("method", choices=METHODS)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--per-level", type=int, default=None)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--out-dir", default="results/raw")
     args = parser.parse_args()
 
     problems = load_problems()
+    if args.per_level:
+        problems = stratified(problems, args.per_level)
     runner = Runner(args.method, METHODS[args.method],
                     out_dir=args.out_dir, workers=args.workers)
     records = runner.run(problems, limit=args.limit)

@@ -26,6 +26,10 @@ EQUAL_CASES = [
     ("x=7", "7", False),
     ("", "7", False),
     ("\\{1,2\\}", "\\{1,2\\}", True),
+    ("90^\\circ", "90", True),
+    ("90^{\\circ}", "90^\\circ", True),
+    ("-2, 1", "1,-2", True),
+    ("(1,2)", "(2,1)", False),
 ]
 
 NORMALIZE_CASES = [

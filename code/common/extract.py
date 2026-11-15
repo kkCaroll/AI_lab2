@@ -65,6 +65,7 @@ _REPLACE = (
     (r"\\;", ""),
     (r"\\quad", ""),
     (r"\\qquad", ""),
+    (r"\^\{?\\circ\}?", ""),
     (r"\$", ""),
 )
 
@@ -97,6 +98,39 @@ def _sympy_equal(a: str, b: str) -> bool:
         return False
 
 
+def _split_top(s: str):
+    """按顶层逗号切分，括号或集合内部不切。"""
+    if "(" in s or "[" in s:
+        return None
+    parts, depth, cur = [], 0, ""
+    for ch in s:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    return [p for p in parts if p]
+
+
+def _list_equal(a: str, b: str) -> bool:
+    """逗号分隔的答案按无序多元集比较。"""
+    pa, pb = _split_top(a), _split_top(b)
+    if not pa or not pb or len(pa) < 2 or len(pa) != len(pb):
+        return False
+    rest = list(pb)
+    for x in pa:
+        hit = next((y for y in rest if is_equal(x, y)), None)
+        if hit is None:
+            return False
+        rest.remove(hit)
+    return True
+
+
 def is_equal(pred: str, gold: str) -> bool:
     a, b = normalize(pred), normalize(gold)
     if not a:
@@ -107,6 +141,9 @@ def is_equal(pred: str, gold: str) -> bool:
     fa, fb = _as_float(a), _as_float(b)
     if fa is not None and fb is not None:
         return math.isclose(fa, fb, rel_tol=1e-6, abs_tol=1e-9)
+
+    if _list_equal(a, b):
+        return True
 
     if _sympy_equal(a, b):
         return True

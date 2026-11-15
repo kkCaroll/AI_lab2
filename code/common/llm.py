@@ -14,7 +14,7 @@ def get_client() -> OpenAI:
     if _client is None:
         if not API_KEY:
             raise RuntimeError("未设置 DASHSCOPE_API_KEY")
-        _client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+        _client = OpenAI(api_key=API_KEY, base_url=BASE_URL, timeout=120, max_retries=0)
     return _client
 
 

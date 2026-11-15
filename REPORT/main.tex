@@ -1,0 +1,183 @@
+\documentclass[12pt]{ctexart}
+
+\usepackage{geometry}
+\geometry{a4paper, margin=2.5cm}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta}
+\usepackage{caption}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\tbd}{\texttt{TBD}}
+
+\title{实验二 多智能体系统设计与评测}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{实验原理}
+
+本实验以 MATH-500 数学题为任务，在统一模型 qwen3.7-flash 上比较五种规定方法与一种自研多智能体系统。所有方法共用同一提示词中的答案格式约束、同一答案抽取函数与同一解码参数，差异只来自调用结构。
+
+\subsection{五种对照方法}
+
+Direct 单次调用直接给出最终答案，作为下界。Chain-of-Thought 同样单次调用，但要求先分步推理再给出答案。Self-Consistency 用同一提示词独立采样五次，对抽取后的答案做多数票，以抵消单次采样的偶然性。Self-Refine 在初答之后由同一模型自评并至少修改一轮，此后自评认为正确即停止，最多三轮反馈。Multi-Agent Debate 使用三个智能体四轮讨论，第一轮各自独立作答，之后每一轮都能读到其余智能体上一轮的完整解答，最后对末轮抽取结果做多数票。
+
+\subsection{自研系统}
+
+自研系统包含四个职责不同的角色，并按题目难度选择参与角色。
+
+\begin{itemize}
+  \item Planner 读取题面，给出 1 至 5 的难度评分与一句话求解方案。评分为 1 时路由为 easy，为 2 时路由为 medium，不低于 3 时路由为 hard。
+  \item Solver 读取题面与 Planner 的方案，输出完整解答与 \verb|\boxed{}| 答案。
+  \item Verifier 读取题面与 Solver 的解答，hard 时还读取 decompose Skill 生成的子目标并逐条核对覆盖，给出 PASS 或 FAIL、0 至 100 的置信度与错误位置。
+  \item Reviser 读取题面、原解答与 Verifier 的意见，输出修订解答。
+\end{itemize}
+
+系统的信息流如图 \ref{fig:arch} 所示。easy 只调用 Planner 与 Solver。medium 在 Solver 之后调用 Verifier，判定通过且置信度不低于 75 时结束，否则调用 Reviser。hard 在 Verifier 核查前调用 decompose Skill 生成子目标，供 Verifier 逐条核对，判定通过后追加 substitute\_check Skill 做代回检验，检验不通过时同样进入 Reviser。
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+      node distance=1.3cm and 2.0cm,
+      box/.style={draw, rounded corners, align=center, minimum width=3.2cm, minimum height=1cm},
+      skill/.style={draw, dashed, rounded corners, align=center, minimum width=3cm, minimum height=1.2cm},
+      ->/.style={-{Latex[length=2mm]}}
+    ]
+    \node[box] (p) {Planner\\难度评分与方案};
+    \node[box, below=of p] (s) {Solver\\完整解答};
+    \node[box, below=of s] (v) {Verifier\\判定与置信度};
+    \node[box, right=of v] (r) {Reviser\\修订解答};
+    \node[skill, left=2.6cm of v] (k) {Skill 层\\decompose\\substitute\_check};
+    \node[box, below=of v] (out) {最终答案};
+    \draw[->] (p) -- node[left]{方案} (s);
+    \draw[->] (s) -- node[left]{解答} (v);
+    \draw[->] (v) -- node[above]{FAIL} (r);
+    \draw[->, dashed] (r) to[bend left=25] node[above]{复审} (v);
+    \draw[->] (v) -- node[right]{PASS 且置信度达标} (out);
+    \draw[dashed, {Latex[length=2mm]}-{Latex[length=2mm]}]
+      (v) -- node[above, font=\small]{调用} node[below, font=\small]{子目标} (k);
+  \end{tikzpicture}
+  \caption{自研多智能体系统的结构与信息传递}
+  \label{fig:arch}
+\end{figure}
+
+\section{实验设置}
+
+\begin{table}[H]
+  \centering
+  \caption{统一实验设置}
+  \begin{tabular}{ll}
+    \toprule
+    项目 & 取值 \\
+    \midrule
+    模型 & qwen3.7-flash \\
+    数据集 & HuggingFaceH4/MATH-500，500 题全量 \\
+    temperature & 0.7 \\
+    top\_p & 0.8 \\
+    enable\_thinking & False \\
+    max\_tokens & 8192 \\
+    Self-Consistency 采样次数 & 5 \\
+    Self-Refine 反馈轮数 & 最多 3 \\
+    Debate 智能体数与轮数 & 3 与 4 \\
+    自研系统难度评分路由 & 1 为 easy，2 为 medium，3 至 5 为 hard \\
+    自研系统置信度阈值 & 75 \\
+    自研系统每题调用上限 & 8 \\
+    自研系统平均 token 预算 & 6500 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+答案抽取对六种方法一致。优先取最后一个平衡的 \verb|\boxed{}|，其次取 answer is 之后的内容，最后取末行公式。规范化删除空白与格式命令，统一分式写法，去掉角度的度数符号，并在字符串比较之外用 sympy 化简判定代数等价。
+
+\section{实验结果}
+
+\begin{table}[H]
+  \centering
+  \caption{六种方法在 MATH-500 上的准确率与平均每题 token}
+  \begin{tabular}{lcccccccc}
+    \toprule
+    方法 & Overall & L1 & L2 & L3 & L4 & L5 & 输入 & 输出 \\
+    \midrule
+    Direct & 47.00 & 74.42 & 65.56 & 52.38 & 36.72 & 31.34 & 137 & 186 \\
+    CoT & 93.40 & 97.67 & 93.33 & 97.14 & 92.97 & 89.55 & 142 & 1341 \\
+    Self-Consistency & 94.20 & 95.35 & 93.33 & 98.10 & 93.75 & 91.79 & 712 & 6718 \\
+    Self-Refine & 93.80 & 97.67 & 93.33 & 98.10 & 92.97 & 90.30 & 6670 & 3954 \\
+    Multi-Agent Debate & 94.20 & 97.67 & 93.33 & 98.10 & 93.75 & 91.04 & 29930 & 11945 \\
+    自研系统 & 93.60 & 97.67 & 93.33 & 98.10 & 93.75 & 88.81 & 1807 & 1535 \\
+    \bottomrule
+  \end{tabular}
+
+  \smallskip
+  \footnotesize 准确率以 500 题为分母，分难度准确率以该难度题数为分母。token 为平均每题数值，单位为 token，输入与输出分别累计，自研系统的总 token 为两者之和，约束为不超过 6500。
+\end{table}
+
+\section{结果分析}
+
+\subsection{与五种对照的机制差异}
+
+Direct 作为下界只有 47.00，说明 MATH-500 中的多数题目无法由一次性直觉作答解决。CoT 提升到 93.40，单次调用中要求分步推理已经获得了绝大部分收益。以 CoT 为参照，Self-Consistency 提升 0.80，Self-Refine 提升 0.40，Debate 提升 0.80，自研系统提升 0.20。
+
+Self-Consistency 的增益来自采样的多样性。五次独立采样后多数票，使 L5 准确率从 89.55 升至 91.79，是四种多次调用方法中 L5 最高者。Self-Refine 用同一模型自我批判，在没有外部信号时批判意见与初答高度同向，236 题只完成一轮修订即因自评通过而停止，最终增益 0.40，token 达到 CoT 的 7.16 倍。Debate 让三个智能体互相传阅完整解答，输入 token 随轮数线性增长，达到 CoT 的 28.24 倍。实测 500 题中首轮三个智能体的答案有 468 题完全一致，四轮讨论中答案改变的次数合计只有 41 次，因此多数票近似于对首轮的多数票，准确率与 Self-Consistency 相同。
+
+自研系统在 2.25 倍 CoT token 下达到 93.60，是四种多次调用方法中成本最低者。其机制差异在于按难度分配调用，144 题走 easy 路径，只调用 Planner 与 Solver，平均 844 token。与 Debate 相比，自研系统不向 Solver 传阅他人解答，因此输入 token 只有其 6.0\%。
+
+\subsection{分难度表现}
+
+Direct 在 L1 与 L2 分别有 74.42 与 65.56，已高于其在 L3 至 L5 的 52.38、36.72 与 31.34，说明难度上升后推理步骤的增加是必要的。CoT 及以上五种方法的 L1 至 L4 都在 92 以上，差异集中体现在 L5。
+
+L5 共 134 题，各方法准确率依次为 Direct 31.34、CoT 89.55、Self-Refine 90.30、Debate 91.04、Self-Consistency 91.79、自研系统 88.81。自研系统是唯一在 L5 低于 CoT 的方法。原因有二，一是难度路由把 62 道 L5 题判为 hard，其余 66 道进入 medium 或 easy，路由依据的是模型自估难度而非数据集等级，二者的相关并不完全；二是 hard 路径中有 14 题因预算不足跳过了 Skill 与追加核查。
+
+\begin{table}[H]
+  \centering
+  \caption{自研系统的路由分布与表现}
+  \label{tab:route}
+  \begin{tabular}{lccccc}
+    \toprule
+    路由 & 题数 & 准确率 & 平均 token & 平均调用 & 数据集 L4 与 L5 占比 \\
+    \midrule
+    easy & 144 & 95.83 & 844 & 2.00 & 20.1\% \\
+    medium & 260 & 93.08 & 2938 & 3.01 & 58.1\% \\
+    hard & 96 & 91.67 & 8181 & 4.52 & 85.4\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+表 \ref{tab:route} 显示路由与数据集难度同向。hard 路由中 L4 与 L5 合计占 85.4\%，easy 路由中仅占 20.1\%。但 hard 路由的准确率反而低于 easy，说明被模型判为困难的题目本身更难，路由并未从中筛选出更容易解决的子集。
+
+\subsection{token 消耗}
+
+六种方法的平均每题总 token 依次为 Direct 323、CoT 1483、自研系统 3342、Self-Consistency 7430、Self-Refine 10624、Debate 41875。以准确率对 token 求边际，Self-Consistency 用 5.01 倍于 CoT 的 token 换取 0.80 个百分点，Debate 用 28.24 倍换取 0.80 个百分点，自研系统用 2.25 倍换取 0.20 个百分点。
+
+自研系统的 token 分布高度依赖路由。easy 平均 844，medium 平均 2938，hard 平均 8181。hard 路径超过 6500 的原因是 Solver 在长链推理中输出较多，Verifier 又需读取完整解答，单次调用的输入已经达到数千 token。全量平均 3342，低于 6500 的约束，但 73 题单题超过 6500，占 14.6\%。这些题在预算耗尽后跳过剩余 Skill 与修订，直接输出当前答案。
+
+\subsection{失败样本与误差来源}
+
+六种方法均无请求失败、空输出与抽取失败。输出触及 8192 上限的题数为 Direct 1 题、CoT 3 题，CoT 的 3 题都在给出 \verb|\boxed{}| 之前被截断，答案退回末行公式抽取后判错，占 0.6\%。多调用方法记录的是累计 token，无法逐次判断截断。
+
+自研系统的误差来源分三类。第一类是推理错误，多步代换中把待求量当作已知量，或分类讨论漏掉一类情形，这类错误在 L5 最为集中，Solver 阶段 hard 路由准确率 90.6 即由此决定。第二类是核查无效，356 题进入 Verifier，其中 337 题通过，发生修订 23 题，仅 1 题由错改对，0 题由对改错，说明自我核查在无外部工具时难以识别深层推理错误。第三类是预算截断，hard 路径平均 8181 token，超出预算的题目跳过了 Skill 与修订，实际执行的是简化流程。
+
+另需说明一处设计调整。首版把 decompose 生成的子目标并入 Solver 提示词，在 100 道 hard 路由题上准确率 86.0，仅给题面时为 94.0，方案与子目标并列时为 91.0 至 92.0。子目标一致地降低准确率，因此改为由 Verifier 使用，Solver 只接收方案。该对照在同一数据上进行，故自研系统的 L5 准确率带有一定的选择偏差。
+
+\section{实验总结}
+
+最难的约束是平均每题 6500 token。Debate 的传阅方式达到 41875，若自研系统照搬则无法满足预算，因此改为只向 Verifier 传递完整解答，Solver 不接触他人输出。为压缩调用，系统按难度路由，easy 只走两步，hard 才启用两个 Skill 与修订，并把置信度 75 与预算上限作为提前终止条件。
+
+实验中较有意义的结论有三条。其一，在能力已经较强的模型上，多智能体协作的收益有限，CoT 的 93.40 已接近上限，五种多次调用方法的最高值为 94.20，差距不足一个百分点。其二，成本与收益不成比例，Debate 的 token 是 Self-Consistency 的 5.6 倍而准确率相同。其三，自研系统以 2.25 倍 CoT 的成本达到 93.60，在多次调用方法中成本最低，其难度路由与预算闸门是控制成本的主要手段。
+
+本实验的局限在于单一模型、单次运行，未做显著性检验，0.8 个百分点的差异在 500 题上约为 4 题，处于噪声范围。自研系统的 Skill 交付对象经过一次基于同一数据的对照，L5 结果可能偏乐观。
+
+\begin{thebibliography}{9}
+\bibitem{wei2022} Wei J, Wang X, Schuurmans D, et al. Chain-of-Thought Prompting Elicits Reasoning in Large Language Models. NeurIPS, 2022.
+\bibitem{wang2023} Wang X, Wei J, Schuurmans D, et al. Self-Consistency Improves Chain of Thought Reasoning in Language Models. ICLR, 2023.
+\bibitem{madaan2023} Madaan A, Tandon N, Gupta P, et al. Self-Refine: Iterative Refinement with Self-Feedback. NeurIPS, 2023.
+\bibitem{du2023} Du Y, Li S, Torralba A, et al. Improving Factuality and Reasoning in Language Models through Multiagent Debate. 2023.
+\end{thebibliography}
+
+\end{document}
